@@ -40,6 +40,16 @@ _RAW = (
     ("CI_INTERVAL_OVERLAP", 250, "前两渠道区间重叠", "confidence"),
     ("CI_BUDGET_MISMATCH", 260, "预算首位与份额首位不一致", "confidence"),
     ("CI_SAME_SECOND_TIE", 270, "同秒触点按编号定序", "confidence"),
+    ("ST_BATCH_REPEAT", 300, "同一结算批次重复提交，已忽略", "settlement"),
+    ("ST_PENDING_EXCLUDED", 310, "待确认返点不计入可核销收益", "settlement"),
+    ("ST_PENDING_SUPERSEDED", 320, "待确认返点已被同账期正式结算取代", "settlement"),
+    ("ST_TIER_UP", 330, "累计花费跨档，整组回溯费率", "settlement"),
+    ("ST_REBATE_MISMATCH", 340, "媒体返点与合同费率不一致", "settlement"),
+    ("ST_DUPLICATE_PERIOD", 350, "同一渠道账期已有正式结算", "settlement"),
+    ("ST_CONTRACT_MISSING", 360, "返点合同未配置", "settlement"),
+    ("BD_SETTLED_BASIS", 400, "按已核销返点调整后收益生成", "budget"),
+    ("BD_OBSERVED_BASIS", 410, "无已核销证据，按观察花费计算", "budget"),
+    ("BD_SETTLEMENT_MISSING", 420, "缺少已核销证据，未生成新版本", "budget"),
     ("OUT_OF_WINDOW", 900, "不在归因窗口内", "window"),
 )
 
@@ -51,7 +61,8 @@ PRIORITY = {reason.code: reason.order for reason in REASONS}
 QUARANTINE_CODES = tuple(r.code for r in REASONS if r.scope in {"touch", "order", "alias"})
 
 LEVELS = {"touch": "隔离", "order": "隔离", "alias": "隔离", "file": "失败",
-          "window": "不计入", "confidence": "结论"}
+          "window": "不计入", "confidence": "结论", "settlement": "结论",
+          "budget": "结论"}
 
 
 def label(code: str) -> str:

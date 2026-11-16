@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}返点结算{% endblock %}
+{% block heading %}返点结算{% endblock %}
+{% block content %}
+{% if not settlement.ledger.totals.settled_spend_cents and not settlement.ledger.batches %}
+<section class="section">
+  <div class="empty">
+    还没有结算批次。
+    <button class="btn btn--primary" data-settlement-samples="1" type="button">导入样例结算</button>
+  </div>
+</section>
+{% else %}
+<section class="section">
+  <div class="strip">
+    <div class="meter"><div class="meter__label">已结算花费</div><div class="meter__value">{{ settlement.ledger.totals.settled_spend_cents|money }}<span class="meter__unit">元</span></div></div>
+    <div class="meter"><div class="meter__label"><span class="dot dot--ok"></span>已核销返点</div><div class="meter__value">{{ settlement.ledger.totals.confirmed_rebate_cents|money }}<span class="meter__unit">元</span></div></div>
+    <div class="meter"><div class="meter__label"><span class="dot dot--warn"></span>待确认返点</div><div class="meter__value">{{ settlement.ledger.totals.pending_rebate_cents|money }}<span class="meter__unit">元</span></div></div>
+    <div class="meter"><div class="meter__label">可核销成本</div><div class="meter__value">{{ settlement.ledger.totals.effective_cost_cents|money }}<span class="meter__unit">元</span></div></div>
+    <div class="meter"><div class="meter__label">结算批次</div><div class="meter__value">{{ settlement.ledger.batches|length }}</div></div>
+  </div>
+  <div class="toolbar">
+    <button class="btn btn--primary" data-settlement-samples="1" type="button">导入样例结算</button>
+    <span class="toolbar__spacer"></span>
+    <span class="legend">
+      <span><span class="dot dot--ok"></span>已核销</span>
+      <span><span class="dot dot--warn"></span>待确认</span>
+      <span class="muted">合同 {{ settlement.contract.contract_id }}{% if settlement.contract.digest %} · {{ settlement.contract.digest[:12] }}{% endif %}</span>
+    </span>
+  </div>
+  {% if settlement.reasons %}
+  <div class="toolbar">
+    {% for item in settlement.reasons %}
+    <span class="chip chip--static" title="{{ item.code }}">{{ item.label }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+<section class="section">
+  <div class="section__head">
+    <span class="section__title">渠道档位与花费</span>
+    <span class="section__sub">累计已结算花费决定档位，跨档后整组回溯费率</span>
+  </div>
+  <div class="table-wrap">
+    <table class="t" data-sortable>
+      <thead>
+        <tr><th>渠道</th><th class="num" data-sort="num">累计已结算(元)</th><th class="num" data-sort="num">当前档位</th>
+        <th class="num" data-sort="num">费率</th><th class="num" data-sort="num">距下一档(元)</th>
+        <th class="num" data-sort="num">已核销返点(元)</th><th class="num" data-sort="num">待确认返点(元)</th>
+        <th class="num" data-sort="num">可核销成本(元)</th><th class="num" data-sort="num">归因份额(元)</th></tr>
+      </thead>
+      <tbody>
+        {% for row in settlement.ledger.channels %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td class="num">{{ row.settled_spend_cents|money }}</td>
+          <td class="num">{{ row.current_tier.index + 1 }}/{{ row.tiers|length }}</td>
+          <td class="num">{{ row.current_tier.rate_pct }}%</td>
+          <td class="num">{% if row.next_tier %}{{ row.to_next_tier_cents|money }}{% else %}—{% endif %}</td>
+          <td class="num">{{ row.confirmed_rebate_cents|money }}</td>
+          <td class="num">{% if row.pending_rebate_cents %}<span class="dot dot--warn"></span>{{ row.pending_rebate_cents|money }}{% else %}—{% endif %}</td>
+          <td class="num">{{ (row.settled_spend_cents - row.confirmed_rebate_cents)|money }}</td>
+          <td class="num">{{ row.gmv_cents|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section__head">
+    <span class="section__title">合同阶梯</span>
+    <span class="section__sub">{{ settlement.contract.contract_id }}</span>
+  </div>
+  <div class="table-wrap">
+    <table class="t" data-sortable>
+      <thead><tr><th>渠道</th><th class="num" data-sort="num">档</th><th class="num" data-sort="num">累计门槛(元)</th><th class="num" data-sort="num">费率</th><th>当前</th></tr></thead>
+      <tbody>
+        {% for channel in settlement.contract.channels %}
+        {% for tier in channel.tiers %}
+        <tr>
+          <td>{% if loop.first %}{{ channel_labels.get(channel.channel, channel.channel) }}{% endif %}</td>
+          <td class="num">{{ tier.index + 1 }}</td>
+          <td class="num">{{ tier.min_spend_cents|money }}</td>
+          <td class="num">{{ tier.rate_pct }}%</td>
+          <td>{% for row in settlement.ledger.channels %}{% if row.channel == channel.channel and row.current_tier.index == tier.index %}<span class="dot dot--ok"></span>生效{% endif %}{% endfor %}</td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section__head">
+    <span class="section__title">结算批次</span>
+    <span class="section__sub">{{ settlement.ledger.batches|length }} 批 · 同一批重试不会重复计返点</span>
+  </div>
+  <div class="table-wrap">
+    <table class="t" data-sortable>
+      <thead><tr><th>批次</th><th>账期</th><th>来源</th><th class="num" data-sort="num">行数</th><th class="num" data-sort="num">已结算(元)</th><th class="num" data-sort="num">已核销返点(元)</th><th class="num" data-sort="num">待确认(元)</th><th class="num" data-sort="num">跨档</th><th>导入</th></tr></thead>
+      <tbody>
+        {% for batch in settlement.ledger.batches %}
+        <tr>
+          <td class="mono" title="{{ batch.digest }}">{{ batch.batch_id }}</td>
+          <td class="mono">{{ batch.period }}</td>
+          <td>{{ batch.source }}</td>
+          <td class="num">{{ batch.line_count }}</td>
+          <td class="num">{{ batch.settled_spend_cents|money }}</td>
+          <td class="num">{{ batch.confirmed_rebate_cents|money }}</td>
+          <td class="num">{{ batch.pending_rebate_cents|money }}</td>
+          <td class="num">{{ batch.tier_ups }}</td>
+          <td class="mono">{{ batch.received_at|local }}</td>
+        </tr>
+        {% endfor %}
+        {% if not settlement.ledger.batches %}
+        <tr><td colspan="9" class="muted">还没有批次。</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section__head">
+    <span class="section__title">逐行留痕</span>
+    <span class="section__sub">合同档位、归因份额、已结算花费、待确认返点分列</span>
+  </div>
+  <div class="table-wrap">
+    <table class="t" data-sortable>
+      <thead><tr><th>账期</th><th>渠道</th><th class="num" data-sort="num">已结算(元)</th><th class="num" data-sort="num">累计前(元)</th><th class="num" data-sort="num">累计后(元)</th><th class="num" data-sort="num">档位</th><th class="num" data-sort="num">合同返点(元)</th><th class="num" data-sort="num">媒体返点(元)</th><th>状态</th><th>备注</th></tr></thead>
+      <tbody>
+        {% for row in settlement.ledger.channels %}
+        {% for line in row.lines %}
+        <tr class="{% if line.rebate_status == 'pending' %}is-late{% endif %}">
+          <td class="mono">{{ line.period }}</td>
+          <td>{{ row.label }}</td>
+          <td class="num">{{ line.settled_spend_cents|money }}</td>
+          <td class="num muted">{{ line.cumulative_before_cents|money }}</td>
+          <td class="num">{{ line.cumulative_after_cents|money }}</td>
+          <td class="num">{{ line.tier_index + 1 }} · {{ line.tier_rate_pct }}%</td>
+          <td class="num">{{ line.contract_rebate_cents|money }}</td>
+          <td class="num">{{ line.reported_rebate_cents|money if line.reported_rebate_cents is not none else "—" }}</td>
+          <td>{{ line.rebate_status|status_label }}</td>
+          <td class="muted">
+            {% if line.superseded %}已被正式结算取代{% endif %}
+            {% if line.tier_up %}{% if line.superseded %} · {% endif %}跨档{% endif %}
+            {% if line.mismatch %}{% if line.superseded or line.tier_up %} · {% endif %}媒体与合同不一致{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+        {% if not settlement.ledger.channels %}
+        <tr><td colspan="10" class="muted">还没有结算行。</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

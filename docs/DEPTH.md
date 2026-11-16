@@ -1,8 +1,8 @@
 # 深度登记 mixcredit
 
-- 规模：中型（7 个功能模块，53 个 Python 文件，85 条测试）
-- 核心规则：触点按 `[t-窗口, t)` 归因到订单，五个模型各自合计必须等于订单成交额；预算按边际 ROI 贪心加档，受渠道上下限约束且分完等于总额；置信区间按订单簇有放回重采样 200 次，给出渠道份额与 ROI 的 90% 区间并判定建议是否成立。
-- 使用者与工作流：清野日化增长组 7 人，每周把六个渠道的触点与订单导入，先看触点是否计入、再看五个模型的渠道份额，最后按总额重排预算并把结果导出复核。
+- 规模：中型（8 个功能模块，47 个 Python 文件，118 条测试）
+- 核心规则：触点按 `[t-窗口, t)` 归因到订单，五个模型各自合计必须等于订单成交额；预算按边际 ROI 贪心加档，受渠道上下限约束且分完等于总额；置信区间按订单簇有放回重采样 200 次，给出渠道份额与 ROI 的 90% 区间并判定建议是否成立；渠道合同按累计花费设阶梯返点，跨档整组回溯，只把媒体已核销返点计入收益与预算，待确认返点单独留痕。
+- 使用者与工作流：清野日化增长组 7 人，每周把六个渠道的触点与订单导入，先看触点是否计入、再看五个模型的渠道份额，然后导入媒体月结返点批次核对档位与可核销收益，最后按总额重排预算并把结果导出复核。
 
 ## 功能模块
 
@@ -12,9 +12,10 @@
 | M2 窗口与别名 | 查字段契约、窗口定义，确认跨设备合并 | GET /api/contract | `app/modules/m2_window/contract.py` `app/modules/m2_window/coerce.py` `app/modules/m2_window/window.py` `app/modules/m2_window/alias.py` | `tests/test_window.py` |
 | M3 质量隔离 | 看原因码分布、隔离行与四账 | GET /api/quarantine | `app/modules/m3_quality/rules.py` `app/modules/m3_quality/quarantine.py` `app/modules/m3_quality/service.py` | `tests/test_quality.py` |
 | M4 归因计算 | 切换五个模型，看渠道份额与 ROI | GET /api/attribution | `app/modules/m4_attribution/models.py` `app/modules/m4_attribution/decay.py` `app/modules/m4_attribution/allocate.py` | `tests/test_attribution.py` |
-| M5 预算重分配与批次 | 提交总额与方案版本，看新预算与版本历史 | POST /api/budgets | `app/modules/m5_budgets/greedy.py` `app/modules/m5_budgets/roi.py` `app/modules/m5_budgets/batches.py` | `tests/test_budgets.py` |
-| M6 报告导出 | 导出触点/订单/份额 CSV、整体 JSON 与运行清单 | GET /api/export.csv | `app/modules/m6_export/csv_out.py` `app/modules/m6_export/json_out.py` `app/modules/m6_export/manifest_out.py` | `tests/test_export.py` |
+| M5 预算重分配与批次 | 提交总额、方案版本与成本口径，看新预算、调整前后与版本历史 | POST /api/budgets | `app/modules/m5_budgets/greedy.py` `app/modules/m5_budgets/roi.py` `app/modules/m5_budgets/batches.py` `app/modules/m5_budgets/service.py` | `tests/test_budgets.py` `tests/test_rebate_budget.py` |
+| M6 报告导出 | 导出触点/订单/份额/返点 CSV、整体 JSON 与运行清单 | GET /api/export.csv | `app/modules/m6_export/csv_out.py` `app/modules/m6_export/json_out.py` `app/modules/m6_export/manifest_out.py` | `tests/test_export.py` |
 | M7 归因置信区间 | 选模型与抽样次数，看渠道份额与 ROI 的区间和结论 | POST /api/confidence | `app/modules/m7_confidence/frame.py` `app/modules/m7_confidence/resample.py` `app/modules/m7_confidence/interval.py` `app/modules/m7_confidence/service.py` | `tests/test_m7_bootstrap.py` `tests/test_m7_stability.py` |
+| M8 返点结算 | 导入媒体月结批次，看合同阶梯、累计花费与档位、已核销/待确认返点 | POST /api/settlements | `app/modules/m8_settlement/contract.py` `app/modules/m8_settlement/imports.py` `app/modules/m8_settlement/ledger.py` `app/modules/m8_settlement/service.py` | `tests/test_settlement.py` `tests/test_settlement_api.py` |
 
 ## 陷阱登记
 
@@ -40,14 +41,24 @@
 | TRAP-26 | 旧方案版本覆盖新方案 | 后提交无条件覆盖 | 版本号必须等于当前最大版本 + 1，旧版本 409 | `app/modules/m5_budgets/batches.py` | `tests/test_budgets.py::test_stale_plan_version_rejected` |
 | TRAP-27 | 同一秒的两个触点排序 | 只按事件时间排序，次序跟着证据行序走，首触点与位置权重会翻转，渠道份额随之漂移 | 触点按 (`事件时间`, `触点编号`) 全序排序，帧摘要与区间对输入行序不变 | `app/modules/m7_confidence/frame.py` | `tests/test_m7_bootstrap.py::test_same_second_touches_use_touch_id_tie_break` |
 | TRAP-28 | 同一订单号出现两行（冲突、重复提交、按份额行抽取） | 按行累加或按份额行重采样，一单被计两次，帧合计高于对账成交额 | 按订单号分组去重，只取 row_no 最小的有效行；抽样单位是订单簇，重复行计数并在页面列出 | `app/modules/m7_confidence/frame.py` | `tests/test_m7_bootstrap.py::test_frame_keeps_one_row_per_order_and_skips_invalid` |
+| TRAP-29 | 合同是累计花费阶梯，跨过门槛后整组投放换档 | 只对超出门槛的部分算返点，或按单期花费选档，跨档后退点少算 | 按渠道累计已结算花费选档，整组回溯；本期返点 = 含本期累计返点 − 不含本期累计返点 | `app/modules/m8_settlement/contract.py` | `tests/test_settlement.py::test_tier_crossing_is_retroactive_over_whole_group` |
+| TRAP-30 | 先有本月、后补上月，档位与返点需要重算 | 复用导入时的档位快照，补录后累计与档位对不上 | 台账读取时按全部历史账期重排重算，逐期增量相加 = 按最终档位算一次 | `app/modules/m8_settlement/ledger.py` | `tests/test_settlement.py::test_ledger_recomputes_when_older_period_arrives_later` |
+| TRAP-31 | 媒体月结文件重试提交 | 每提交一次就多计一笔返点，成本被越扣越多 | 批次键由来源 + 内容摘要决定，同批重试返回 `repeat`，不写第二遍 | `app/modules/m8_settlement/imports.py` | `tests/test_settlement.py::test_same_batch_retry_does_not_double_count` |
+| TRAP-32 | 返点要等月结才生效，媒体先给了预估值 | 把待确认返点当已到账，直接冲减成本、重分预算 | 待确认返点只展示与留痕；成本、ROI、可分配总额只认 `confirmed` | `app/modules/m8_settlement/ledger.py` | `tests/test_rebate_budget.py::test_missing_evidence_keeps_old_version` |
+| TRAP-33 | 同渠道同账期既有待确认又有正式结算 | 两份都算，返点翻倍 | 正式结算行取代同账期待确认行，被取代行标 `superseded` 且不计入合计 | `app/modules/m8_settlement/ledger.py` | `tests/test_settlement.py::test_confirmed_line_supersedes_pending_of_same_period` |
+| TRAP-34 | 新版本取证据失败 | 部分写入或覆盖旧版，已执行方案被改写 | 证据不全返回 409 且不落库；版本落库用 INSERT，同一版本不可覆盖 | `app/modules/m5_budgets/service.py` `app/store.py` | `tests/test_rebate_budget.py::test_missing_evidence_keeps_old_version` |
 
 ## 反例 / 不变量 / 端到端
 
 - 反例：`tests/test_attribution.py::test_naive_float_split_loses_a_cent` —— 逐份四舍五入合计只有 999 分，当前实现 1000 分。
 - 反例（v2）：`tests/test_m7_bootstrap.py::test_duplicate_order_group_counts_once` —— 同一订单号两行按行累加是 20000 分，帧只算 10000 分，另一行进证据表但不进抽样。
+- 反例（v3）：`tests/test_settlement.py::test_tier_crossing_is_retroactive_over_whole_group` —— 只对超出门槛部分按新费率算，跨档后整组返点被少算。
 - 不变量：`tests/test_e2e.py::test_rerun_is_idempotent` —— 同输入重跑命中同一批次键，行数与四账不变。
 - 不变量（v2）：`tests/test_m7_stability.py::test_every_draw_conserves_cluster_total` —— 每次抽样的渠道合计 = 该次抽到的订单簇成交额合计，差额为 0。
+- 不变量（v3）：`tests/test_settlement.py::test_incremental_rebates_sum_to_one_shot_on_cumulative` —— 逐期返点增量相加 = 按最终档位对累计花费算一次，差额为 0。
+- 不变量（v3）：`tests/test_rebate_budget.py::test_allocatable_total_is_not_rewritten_by_rebates` —— 返点只改 ROI 分母，可分配总额仍等于提交总额。
 - 端到端：`tests/test_e2e.py::test_budget_to_export_flow` —— 导入 → 预算 v1 → 导出 JSON → 清单复算。
+- 端到端（v3）：`tests/test_settlement_api.py::test_settlement_view_reconciles_against_attribution` —— 结算台账的归因份额合计 = 有效订单成交额。
 
 ## 对账规则
 
@@ -55,6 +66,7 @@
 - 订单：输入行数 = 有效 + 隔离。
 - 金额：每个模型的渠道份额合计 = 有效订单成交额合计（整数分，差额必须为 0）。
 - 预算：各渠道新预算合计 = 提交总额；每档加投后仍受渠道上下限约束。
+- 返点：逐期返点增量之和 = 按最终档位对累计已结算花费算一次（差额 0）；返点后成本 = 累计已结算 − 累计已核销；待确认返点合计单独列出，不进入前两项。
 - 置信区间：帧合计 = 有效订单成交额；每个订单簇的触点份额合计 = 该单成交额；每次抽样合计 = 抽到的订单簇成交额之和；区间下限 ≤ 点估计 ≤ 区间上限。
 
 ## 已知不覆盖
@@ -66,3 +78,5 @@
 - 预算衰减系数是配置常量，不从历史数据估计。
 - 重采样只在观察到的订单簇上做，不按用户或时段分层，也没做偏差校正（BCa）；订单少于 8 单时区间只作参考。
 - 区间用固定种子的线性同余流，同种子可复算；换种子会得到略不同的上下限，属正常波动。
+- 返点只认媒体月结文件里的正式结算，不做预估入账与冲销；合同按渠道独立定档，不做跨渠道合并谈判。
+- 结算文件按 `YYYY-MM` 账期归集，不做跨月拆分与跨年滚动有效期。

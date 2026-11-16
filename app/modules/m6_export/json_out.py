@@ -18,7 +18,9 @@ def _safe(value):
 
 
 def bundle(run: dict, accounts: dict, models_summary: dict, spend: dict,
-           touches: list[dict], orders: list[dict], credits: list[dict]) -> dict:
+           touches: list[dict], orders: list[dict], credits: list[dict],
+           rebates: list[dict] | None = None,
+           settlement: dict | None = None) -> dict:
     return _safe({
         "run_id": run["run_id"],
         "dataset": run["dataset"],
@@ -31,6 +33,8 @@ def bundle(run: dict, accounts: dict, models_summary: dict, spend: dict,
         "models": [{"code": code, "label": m4_models.label(code), "gmv_cents": value}
                    for code, value in models_summary.items()],
         "spend": spend,
+        "settlement": settlement or {},
+        "rebates": rebates or [],
         "touchpoints": touches,
         "orders": orders,
         "credits": credits,

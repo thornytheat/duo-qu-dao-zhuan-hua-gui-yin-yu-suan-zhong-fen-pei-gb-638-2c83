@@ -85,8 +85,43 @@
 | 下限/上限 | `sample_data/budget_plan.json` 的 `min_yuan` / `cap_yuan` |
 | 加档 | 每次 1000 元，给边际 ROI 最高的渠道 |
 | 边际 ROI | `基础 ROI / (1 + 0.15 × 已加档数)`，同分按渠道代码升序 |
-| 版本 | 必须等于当前最大版本 + 1；小于等于已存在版本 → 409 |
+| 版本 | 必须等于当前最大版本 + 1；小于等于已存在版本 → 409；落库后不可改写 |
 | 守恒 | 各渠道新预算合计 = 总额，差额必须为 0 |
+| 成本口径 | `auto` / `settled` / `observed`，见下节 |
+
+## 返点结算（M8）
+
+| 项 | 定义 |
+|---|---|
+| 合同文件 | `sample_data/rebate_contract.json`，`contract_id` + 各渠道 `tiers` |
+| 档位门槛 | `min_spend_yuan`，按该渠道**累计已结算花费**判定；第一档必须为 0 |
+| 档位费率 | `rate_pct`，必须以基点存整数（`rate_pct × 100`），且随门槛单调不减 |
+| 跨档 | 跨过门槛后**整组回溯**：返点按新费率对全部累计花费计算，不只对超出部分 |
+| 本期返点 | `rebate_at(累计含本期) − rebate_at(累计不含本期)`，逐期相加 = 按最终档位算一次 |
+| 已结算花费 | 媒体月结文件里的 `settled_spend`，按账期 `YYYY-MM` 累加 |
+| 已核销返点 | `rebate_status=confirmed` 且未被他行取代的返点，进入收益与预算 |
+| 待确认返点 | `rebate_status=pending`，只展示、只留痕，**不进入**成本、不改写已执行方案 |
+| 取代 | 同渠道同账期出现正式结算时，此前的待确认行标记 `superseded`，不再计入待确认合计 |
+| 返点后成本 | `累计已结算花费 − 累计已核销返点`；是预算 ROI 的 `settled` 分母 |
+| 批次键 | `sha256(来源 + 文件摘要)`，同批重试命中同一 `batch_id`，返点不重复计 |
+| 账期冲突 | 同渠道同账期已有正式结算时，新批整批拒绝（409，`ST_DUPLICATE_PERIOD`） |
+| 批次原子性 | 任一行不合法整批拒绝，旧台账与旧方案原样保留 |
+| 媒体差异 | 媒体返点与合同应计不一致时，以媒体正式结算入账，并标记 `mismatch` 留痕 |
+
+结算文件列：`period,channel,settled_spend,rebate,status`。
+`settled_spend` / `rebate` 走与触点成本同一套金额归一（千分位、全角、万元）；
+`status` 接受 `confirmed|settled|已确认|已结算` 与 `pending|待确认|待结算`。
+
+## 规划成本口径
+
+| 口径 | 分母 | 何时使用 |
+|---|---|---|
+| `observed` | 本轮导入的渠道花费（未月结） | 默认口径，向后兼容；没有任何结算证据时 |
+| `settled` | 累计已结算花费 − 累计已核销返点 | 六渠道都有已确认结算时；缺任一渠道 → 409 且不写新版本 |
+| `auto` | 有完整已核销证据用 `settled`，否则 `observed` | 页面默认 |
+
+无论哪种口径，可分配总额都等于用户提交的 `total_yuan`；返点只改变 ROI 分母与方案版本内容，
+不会把待确认返点当成新预算、也不会改写已执行版本。
 
 ## 置信区间（M7）
 
@@ -147,5 +182,15 @@
 | `CI_INTERVAL_OVERLAP` | 前两渠道区间重叠 | 结论 |
 | `CI_BUDGET_MISMATCH` | 预算首位与份额首位不一致 | 结论 |
 | `CI_SAME_SECOND_TIE` | 同秒触点按编号定序 | 结论 |
+| `ST_BATCH_REPEAT` | 同一结算批次重复提交，已忽略 | 结论 |
+| `ST_PENDING_EXCLUDED` | 待确认返点不计入可核销收益 | 结论 |
+| `ST_PENDING_SUPERSEDED` | 待确认返点已被同账期正式结算取代 | 结论 |
+| `ST_TIER_UP` | 累计花费跨档，整组回溯费率 | 结论 |
+| `ST_REBATE_MISMATCH` | 媒体返点与合同费率不一致 | 结论 |
+| `ST_DUPLICATE_PERIOD` | 同一渠道账期已有正式结算 | 结论 |
+| `ST_CONTRACT_MISSING` | 返点合同未配置 | 结论 |
+| `BD_SETTLED_BASIS` | 按已核销返点调整后收益生成 | 结论 |
+| `BD_OBSERVED_BASIS` | 无已核销证据，按观察花费计算 | 结论 |
+| `BD_SETTLEMENT_MISSING` | 缺少已核销证据，未生成新版本 | 结论 |
 
 一行命中多条时按上表序号取最小者，与规则书写顺序无关。

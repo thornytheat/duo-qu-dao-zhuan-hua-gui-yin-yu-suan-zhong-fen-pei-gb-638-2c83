@@ -15,7 +15,8 @@ def get_csv(request: Request) -> Response:
     store = request.app.state.store
     kind = request.query_params.get("kind", "touch")
     model = request.query_params.get("model", "time_decay")
-    result = service.export_csv(store, request.query_params.get("run_id"), kind, model)
+    result = service.export_csv(store, request.query_params.get("run_id"), kind, model,
+                                request.app.state.settings)
     return Response(content=result["body"], media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition":
                              f'attachment; filename="{result["filename"]}"'})
@@ -24,7 +25,8 @@ def get_csv(request: Request) -> Response:
 @router.get("/export.json")
 def get_json(request: Request) -> dict:
     return service.export_json(request.app.state.store,
-                               request.query_params.get("run_id"))
+                               request.query_params.get("run_id"),
+                               request.app.state.settings)
 
 
 @router.get("/manifest")

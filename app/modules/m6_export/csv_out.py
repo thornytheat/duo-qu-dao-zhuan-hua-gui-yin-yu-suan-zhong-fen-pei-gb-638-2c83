@@ -15,6 +15,9 @@ TOUCH_HEADER = ["触点编号", "物理行", "主账号", "渠道", "渠道名�
 CREDIT_HEADER = ["归因模型", "订单号", "触点编号", "渠道", "渠道名称", "份额(分)",
                  "触点位置", "迟到"]
 ORDER_HEADER = ["订单号", "物理行", "主账号", "成交额(分)", "下单时间(UTC)", "状态", "原因码"]
+REBATE_HEADER = ["结算批次", "账期", "渠道", "渠道名称", "已结算花费(分)",
+                 "累计前(分)", "累计后(分)", "档位", "费率", "合同返点(分)",
+                 "媒体返点(分)", "返点状态", "计入收益", "跨档", "不一致"]
 
 
 def _money(cents) -> str:
@@ -60,8 +63,33 @@ def orders_csv(rows: list[dict]) -> str:
     return buffer.getvalue()
 
 
+def rebates_csv(rows: list[dict]) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(REBATE_HEADER)
+    for row in rows:
+        writer.writerow([
+            row["batch_id"], row["period"], row["channel"],
+            CHANNEL_LABELS.get(row["channel"], row["channel"]),
+            _money(row["settled_spend_cents"]),
+            _money(row["cumulative_before_cents"]),
+            _money(row["cumulative_after_cents"]),
+            row["tier_index"] + 1,
+            row["tier_rate_pct"],
+            _money(row["contract_rebate_cents"]),
+            "" if row["reported_rebate_cents"] is None
+            else _money(row["reported_rebate_cents"]),
+            row["rebate_status"],
+            "1" if row["counted"] else "0",
+            "1" if row["tier_up"] else "0",
+            "1" if row["mismatch"] else "0",
+        ])
+    return buffer.getvalue()
+
+
 EXPORTERS = {
     "touch": ("touchpoints", touchpoints_csv),
     "credit": ("credits", credits_csv),
     "order": ("orders", orders_csv),
+    "rebate": ("rebates", rebates_csv),
 }

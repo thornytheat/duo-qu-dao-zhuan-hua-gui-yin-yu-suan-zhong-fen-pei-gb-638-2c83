@@ -46,6 +46,20 @@ CREATE TABLE IF NOT EXISTS logs (
   run_id TEXT, seq INTEGER, ts TEXT, level TEXT, message TEXT,
   PRIMARY KEY (run_id, seq)
 );
+CREATE TABLE IF NOT EXISTS settlement_batches (
+  batch_id TEXT PRIMARY KEY, period TEXT, source TEXT, digest TEXT,
+  contract_id TEXT, contract_digest TEXT, line_count INTEGER,
+  received_at TEXT, confirmed_lines INTEGER, pending_lines INTEGER,
+  settled_spend_cents INTEGER, confirmed_rebate_cents INTEGER,
+  pending_rebate_cents INTEGER, detail TEXT
+);
+CREATE TABLE IF NOT EXISTS settlement_lines (
+  batch_id TEXT, period TEXT, channel TEXT,
+  settled_spend_cents INTEGER, rebate_cents INTEGER, rebate_status TEXT,
+  tier_index INTEGER, tier_rate_bp INTEGER, tier_min_spend_cents INTEGER,
+  reported_rebate_cents INTEGER, detail TEXT,
+  PRIMARY KEY (batch_id, channel)
+);
 CREATE INDEX IF NOT EXISTS idx_tp_run ON touchpoints(run_id, status);
 CREATE INDEX IF NOT EXISTS idx_cr_run ON credits(run_id, model, channel);
 """
@@ -210,9 +224,13 @@ class Store:
     # ---- 预算方案 ----
     def save_budget(self, run_id: str, plan_version: int, total_cents: int,
                     payload: dict, created_at: str) -> None:
+        """方案版本一旦落库就不再改写：同版本重复提交直接报唯一约束错误。
+
+        用 INSERT（不是 INSERT OR REPLACE），否则并发或重放会把已执行方案覆盖掉。
+        """
         with self.tx() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO budgets(run_id, plan_version, total_cents, payload,"
+                "INSERT INTO budgets(run_id, plan_version, total_cents, payload,"
                 " created_at, is_stale) VALUES (?,?,?,?,?,0)",
                 (run_id, plan_version, total_cents,
                  json.dumps(payload, ensure_ascii=False), created_at))
@@ -233,6 +251,106 @@ class Store:
             value = conn.execute("SELECT COALESCE(MAX(plan_version),0) FROM budgets"
                                  " WHERE run_id=?", (run_id,)).fetchone()[0]
         return int(value) + 1
+
+    # ---- 结算批次与返点 ----
+    def save_settlement_batch(self, batch: dict, lines: list[dict]) -> bool:
+        """整批原子写入；同一 batch_id 重复提交直接忽略，返点不会重复计。
+
+        返回 True 表示本次是新批次，False 表示命中已存在的批次。
+        """
+        with self.tx() as conn:
+            existing = conn.execute(
+                "SELECT 1 FROM settlement_batches WHERE batch_id=?",
+                (batch["batch_id"],)).fetchone()
+            if existing:
+                return False
+            conn.execute(
+                "INSERT INTO settlement_batches(batch_id, period, source, digest,"
+                " contract_id, contract_digest, line_count, received_at,"
+                " confirmed_lines, pending_lines, settled_spend_cents,"
+                " confirmed_rebate_cents, pending_rebate_cents, detail)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (batch["batch_id"], batch["period"], batch["source"],
+                 batch["digest"], batch["contract_id"], batch["contract_digest"],
+                 int(batch["line_count"]), batch["received_at"],
+                 int(batch["confirmed_lines"]), int(batch["pending_lines"]),
+                 int(batch["settled_spend_cents"]),
+                 int(batch["confirmed_rebate_cents"]),
+                 int(batch["pending_rebate_cents"]),
+                 json.dumps(batch["detail"], ensure_ascii=False)))
+            conn.executemany(
+                "INSERT INTO settlement_lines(batch_id, period, channel,"
+                " settled_spend_cents, rebate_cents, rebate_status, tier_index,"
+                " tier_rate_bp, tier_min_spend_cents, reported_rebate_cents, detail)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                [(batch["batch_id"], batch["period"], line["channel"],
+                  int(line["settled_spend_cents"]), int(line["rebate_cents"]),
+                  line["rebate_status"], int(line["tier_index"]),
+                  int(line["tier_rate_bp"]), int(line["tier_min_spend_cents"]),
+                  (None if line["reported_rebate_cents"] is None
+                   else int(line["reported_rebate_cents"])),
+                  json.dumps(line["detail"], ensure_ascii=False)) for line in lines])
+        return True
+
+    def settlement_batches(self) -> list[dict]:
+        with self.tx() as conn:
+            rows = conn.execute(
+                "SELECT * FROM settlement_batches ORDER BY period, batch_id").fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["detail"] = json.loads(item["detail"])
+            result.append(item)
+        return result
+
+    def get_settlement_batch(self, batch_id: str) -> dict | None:
+        with self.tx() as conn:
+            row = conn.execute("SELECT * FROM settlement_batches WHERE batch_id=?",
+                               (batch_id,)).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["detail"] = json.loads(item["detail"])
+        return item
+
+    def settlement_lines(self, batch_id: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM settlement_lines"
+        params: list = []
+        if batch_id:
+            sql += " WHERE batch_id=?"
+            params.append(batch_id)
+        sql += " ORDER BY period, batch_id, channel"
+        with self.tx() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["detail"] = json.loads(item["detail"])
+            result.append(item)
+        return result
+
+    def settlement_counts(self) -> dict:
+        with self.tx() as conn:
+            batch = conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(SUM(line_count),0) AS lines"
+                " FROM settlement_batches").fetchone()
+            confirmed = conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(SUM(settled_spend_cents),0) AS spend,"
+                " COALESCE(SUM(rebate_cents),0) AS rebate FROM settlement_lines"
+                " WHERE rebate_status='confirmed'").fetchone()
+            pending = conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(SUM(settled_spend_cents),0) AS spend,"
+                " COALESCE(SUM(rebate_cents),0) AS rebate FROM settlement_lines"
+                " WHERE rebate_status='pending'").fetchone()
+        return {
+            "batches": int(batch["n"]), "lines": int(batch["lines"]),
+            "confirmed": {"lines": int(confirmed["n"]),
+                          "spend_cents": int(confirmed["spend"]),
+                          "rebate_cents": int(confirmed["rebate"])},
+            "pending": {"lines": int(pending["n"]),
+                        "spend_cents": int(pending["spend"]),
+                        "rebate_cents": int(pending["rebate"])},
+        }
 
     # ---- 日志 ----
     def logs(self, run_id: str, after: int = 0, limit: int = 400) -> list[dict]:

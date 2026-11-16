@@ -21,10 +21,12 @@ from .modules.m5_budgets import service as m5_service
 from .modules.m6_export import handler as m6_handler
 from .modules.m7_confidence import handler as m7_handler
 from .modules.m7_confidence import service as m7_service
+from .modules.m8_settlement import handler as m8_handler
+from .modules.m8_settlement import service as m8_service
 from .store import Store
 
 MODULES = (m1_handler, m2_handler, m3_handler, m4_handler, m5_handler, m6_handler,
-           m7_handler)
+           m7_handler, m8_handler)
 
 
 def create_app(settings: config.Settings | None = None) -> FastAPI:
@@ -133,15 +135,40 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     def page_budgets(request: Request):
         run = app.state.ctx.current_run()
         plan = m5_service.load_constraints(settings)
+        model = request.query_params.get("model") or "time_decay"
+        if model not in m4_models.MODEL_CODES:
+            model = "time_decay"
+        settlement = (m8_service.overview(settings, store, run["run_id"], model)
+                      if run is not None else None)
         if run is None:
             return web.render(request, "budgets.html", active="budgets",
-                              plan=plan, budgets=[], batches=[], next_version=1)
+                              plan=plan, budgets=[], batches=[], next_version=1,
+                              settlement=None, model=model, models=m4_models.MODELS,
+                              basis=None)
         budgets = store.budgets(run["run_id"])
         return web.render(request, "budgets.html", active="budgets", run=run,
                           plan=plan, budgets=budgets, stats=run["stats"],
                           latest=budgets[0] if budgets else None,
                           next_version=store.next_plan_version(run["run_id"]),
-                          batches=m5_batches.history(store, 12))
+                          batches=m5_batches.history(store, 12),
+                          settlement=settlement["ledger"],
+                          basis=settlement["basis"],
+                          model=model, models=m4_models.MODELS,
+                          settlement_reasons=settlement["reasons"])
+
+    @app.get("/settlements")
+    def page_settlements(request: Request):
+        run = app.state.ctx.current_run()
+        model = request.query_params.get("model") or "time_decay"
+        if model not in m4_models.MODEL_CODES:
+            model = "time_decay"
+        settlement = m8_service.overview(settings, store,
+                                         run["run_id"] if run else None, model)
+        return web.render(request, "settlements.html", active="settlements", run=run,
+                          settlement=settlement, model=model,
+                          models=m4_models.MODELS,
+                          channel_labels=m2_contract.CHANNEL_LABELS,
+                          counts=store.settlement_counts())
 
     @app.get("/confidence")
     def page_confidence(request: Request):

@@ -1,0 +1,48 @@
+{
+  "contract_id": "CT-2026-Q4",
+  "note": "累计花费阶梯返点：跨过门槛后整组投放按新费率回溯计算，费率单调不减。",
+  "channels": {
+    "douyin_feed": {
+      "tiers": [
+        {"min_spend_yuan": 0, "rate_pct": 0},
+        {"min_spend_yuan": 1000, "rate_pct": 3},
+        {"min_spend_yuan": 3000, "rate_pct": 6}
+      ]
+    },
+    "xhs_seed": {
+      "tiers": [
+        {"min_spend_yuan": 0, "rate_pct": 0},
+        {"min_spend_yuan": 500, "rate_pct": 4},
+        {"min_spend_yuan": 1500, "rate_pct": 8}
+      ]
+    },
+    "wechat_moments": {
+      "tiers": [
+        {"min_spend_yuan": 0, "rate_pct": 1},
+        {"min_spend_yuan": 1500, "rate_pct": 2.5},
+        {"min_spend_yuan": 4000, "rate_pct": 5}
+      ]
+    },
+    "baidu_search": {
+      "tiers": [
+        {"min_spend_yuan": 0, "rate_pct": 0},
+        {"min_spend_yuan": 200, "rate_pct": 3.5},
+        {"min_spend_yuan": 800, "rate_pct": 6}
+      ]
+    },
+    "tmall_ads": {
+      "tiers": [
+        {"min_spend_yuan": 0, "rate_pct": 2},
+        {"min_spend_yuan": 900, "rate_pct": 4.5},
+        {"min_spend_yuan": 2000, "rate_pct": 7}
+      ]
+    },
+    "private_group": {
+      "tiers": [
+        {"min_spend_yuan": 0, "rate_pct": 0},
+        {"min_spend_yuan": 300, "rate_pct": 5},
+        {"min_spend_yuan": 900, "rate_pct": 8}
+      ]
+    }
+  }
+}

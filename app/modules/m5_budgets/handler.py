@@ -16,6 +16,7 @@ class BudgetRequest(BaseModel):
     plan_version: int = Field(ge=1)
     total_yuan: int = Field(gt=0, le=100_000_000)
     model: str = "time_decay"
+    cost_basis: str = "auto"
 
 
 @router.post("/budgets")
@@ -27,8 +28,9 @@ def post_budget(request: Request, body: BudgetRequest) -> dict:
     if body.model not in m4_models.MODEL_CODES:
         raise errors.BadRequest(f"未知归因模型：{body.model}",
                                 {"allowed": list(m4_models.MODEL_CODES)})
-    return service.reallocate(request.app.state.settings, store, run["run_id"],
-                              body.plan_version, body.total_yuan * 100, body.model)
+    return service.save_guarded(request.app.state.settings, store, run["run_id"],
+                                body.plan_version, body.total_yuan * 100, body.model,
+                                body.cost_basis)
 
 
 @router.get("/budgets")

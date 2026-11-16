@@ -5,6 +5,43 @@
 {% if not run %}
 <section class="section"><div class="empty">还没有预算方案。</div></section>
 {% else %}
+<section class="section">
+  <div class="section__head">
+    <span class="section__title">成本口径</span>
+    <span class="section__sub">
+      {% if basis.basis == "settled" %}<span class="dot dot--ok"></span>按已核销返点后成本
+      {% elif basis.basis == "mixed" %}<span class="dot dot--warn"></span>部分渠道有已核销证据
+      {% else %}<span class="dot dot--muted"></span>暂无已核销证据，按观察花费{% endif %}
+    </span>
+  </div>
+  <div class="table-wrap">
+    <table class="t" data-sortable>
+      <thead><tr><th>渠道</th><th class="num" data-sort="num">观察花费(元)</th><th class="num" data-sort="num">累计已结算(元)</th><th class="num" data-sort="num">已核销返点(元)</th><th class="num" data-sort="num">返点后成本(元)</th><th class="num" data-sort="num">档位</th><th class="num" data-sort="num">待确认返点(元)</th><th>口径</th></tr></thead>
+      <tbody>
+        {% for code, item in basis.rows.items() %}
+        <tr>
+          <td>{{ plan.channels[code].label if code in plan.channels else code }}</td>
+          <td class="num">{{ item.observed_spend_cents|money }}</td>
+          <td class="num">{{ item.settled_spend_cents|money }}</td>
+          <td class="num">{{ item.rebate_cents|money }}</td>
+          <td class="num">{{ item.effective_cost_cents|money }}</td>
+          <td class="num">{{ ("档 " ~ (item.tier_index + 1) ~ " · " ~ item.tier_rate_pct ~ "%") if item.tier_index is not none else "—" }}</td>
+          <td class="num">{% if item.pending_rebate_cents %}<span class="dot dot--warn"></span>{{ item.pending_rebate_cents|money }}{% else %}—{% endif %}</td>
+          <td class="muted">{{ item.basis|status_label }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if settlement_reasons %}
+  <div class="toolbar">
+    {% for item in settlement_reasons %}
+    <span class="chip chip--static" title="{{ item.code }}">{{ item.label }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
 <div class="grid-2">
   <section class="section">
     <div class="section__head">
@@ -46,11 +83,17 @@
       <div class="field">
         <label for="budget-model">归因模型</label>
         <select id="budget-model" name="model">
-          <option value="time_decay">时间衰减</option>
-          <option value="linear">线性均分</option>
-          <option value="position">位置加权</option>
-          <option value="last">末次触点</option>
-          <option value="first">首次触点</option>
+          {% for code, label in models %}
+          <option value="{{ code }}"{% if code == model %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="budget-basis">成本口径</label>
+        <select id="budget-basis" name="cost_basis">
+          <option value="auto"{% if basis.basis == "settled" %} selected{% endif %}>自动（有已核销证据则用返点后成本）</option>
+          <option value="settled">仅已核销返点后成本</option>
+          <option value="observed">仅观察花费</option>
         </select>
       </div>
       <button class="btn btn--primary" type="submit">提交</button>
@@ -58,14 +101,16 @@
     {% if latest %}
     <div class="table-wrap">
       <table class="t" data-sortable>
-        <thead><tr><th>渠道</th><th class="num" data-sort="num">原(元)</th><th class="num" data-sort="num">新(元)</th><th class="num" data-sort="num">增减</th><th class="num" data-sort="num">基础 ROI</th><th class="num" data-sort="num">边际 ROI</th><th>约束</th></tr></thead>
+        <thead><tr><th>渠道</th><th class="num" data-sort="num">花费(元)</th><th class="num" data-sort="num">上版预算(元)</th><th class="num" data-sort="num">本版预算(元)</th><th class="num" data-sort="num">预算增减</th><th class="num" data-sort="num">返点后成本(元)</th><th class="num" data-sort="num">基础 ROI</th><th class="num" data-sort="num">边际 ROI</th><th>约束</th></tr></thead>
         <tbody>
           {% for row in latest.payload.rows %}
           <tr>
             <td>{{ row.label }}</td>
             <td class="num">{{ row.spend_before_cents|money }}</td>
+            <td class="num">{{ row.budget_before_cents|money if row.budget_before_cents is not none else "—" }}</td>
             <td class="num">{{ row.spend_new_cents|money }}</td>
-            <td class="num">{{ row.delta_cents|money }}</td>
+            <td class="num">{% if row.budget_delta_cents is not none %}{{ row.budget_delta_cents|money }}{% else %}{{ row.delta_cents|money }}{% endif %}</td>
+            <td class="num">{{ row.effective_cost_cents|money if row.effective_cost_cents is defined else "—" }}</td>
             <td class="num">{{ row.base_roi }}</td>
             <td class="num">{{ row.marginal_roi }}</td>
             <td class="muted">{{ row.hit }}</td>
@@ -85,19 +130,22 @@
   </div>
   <div class="table-wrap">
     <table class="t" data-sortable>
-      <thead><tr><th class="num" data-sort="num">版本</th><th class="num" data-sort="num">总额(元)</th><th>模型</th><th class="num" data-sort="num">差额(分)</th><th>生成</th></tr></thead>
+      <thead><tr><th class="num" data-sort="num">版本</th><th class="num" data-sort="num">总额(元)</th><th>模型</th><th>成本口径</th><th class="num" data-sort="num">已核销返点(元)</th><th>合同</th><th class="num" data-sort="num">差额(分)</th><th>生成</th></tr></thead>
       <tbody>
         {% for item in budgets %}
         <tr>
           <td class="num">v{{ item.plan_version }}</td>
           <td class="num">{{ item.total_cents|money }}</td>
           <td class="muted">{{ item.payload.model }}</td>
+          <td class="muted">{{ item.payload.basis|status_label if item.payload.basis else "观察" }}</td>
+          <td class="num">{{ item.payload.evidence.confirmed_rebate_cents|money if item.payload.evidence else "—" }}</td>
+          <td class="mono muted">{{ item.payload.evidence.contract_id if item.payload.evidence else "—" }}</td>
           <td class="num">{{ 0 if item.payload.balanced else item.total_cents - (item.payload.rows|sum(attribute='spend_new_cents')) }}</td>
           <td class="mono">{{ item.created_at|local }}</td>
         </tr>
         {% endfor %}
         {% if not budgets %}
-        <tr><td colspan="5" class="muted">还没有方案。</td></tr>
+        <tr><td colspan="8" class="muted">还没有方案。</td></tr>
         {% endif %}
       </tbody>
     </table>

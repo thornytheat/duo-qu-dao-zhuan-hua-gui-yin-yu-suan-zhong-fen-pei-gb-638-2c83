@@ -40,6 +40,21 @@ class BudgetInfeasible(DomainError):
     code = "E_BUDGET_INFEASIBLE"
 
 
+class SettlementConflict(DomainError):
+    status = 409
+    code = "E_SETTLEMENT_CONFLICT"
+
+
+class SettlementRejected(DomainError):
+    status = 422
+    code = "E_SETTLEMENT_REJECTED"
+
+
+class BudgetEvidenceMissing(DomainError):
+    status = 409
+    code = "E_BUDGET_EVIDENCE_MISSING"
+
+
 def install_handlers(app: FastAPI) -> None:
     @app.exception_handler(DomainError)
     async def _domain(request: Request, exc: DomainError):  # noqa: ANN001

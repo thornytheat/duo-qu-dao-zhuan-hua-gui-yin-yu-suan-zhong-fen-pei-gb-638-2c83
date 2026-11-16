@@ -66,6 +66,7 @@ async function submitBudget(form) {
     total_yuan: Number(form.elements.total_yuan.value),
     model: form.elements.model.value,
   };
+  if (form.elements.cost_basis) body.cost_basis = form.elements.cost_basis.value;
   try {
     await request("/api/budgets", {
       method: "POST",
@@ -80,11 +81,40 @@ async function submitBudget(form) {
   }
 }
 
+async function importSettlement(button) {
+  if (state.busy) return;
+  state.busy = true;
+  clearBanner();
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "导入中";
+  try {
+    const result = await request("/api/settlements/samples", { method: "POST" });
+    if (result.imported === 0 && result.files > 0) {
+      banner(`同一批次重试，已忽略 ${result.repeated} 批，返点未重复计`);
+    }
+    window.location.reload();
+  } catch (error) {
+    banner(error.message);
+    button.disabled = false;
+    button.textContent = label;
+  } finally {
+    state.busy = false;
+  }
+}
+
 document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-run]");
-  if (!button) return;
-  event.preventDefault();
-  triggerRun(button.dataset.run, button);
+  if (button) {
+    event.preventDefault();
+    triggerRun(button.dataset.run, button);
+    return;
+  }
+  const settlement = event.target.closest("[data-settlement-samples]");
+  if (settlement) {
+    event.preventDefault();
+    importSettlement(settlement);
+  }
 });
 
 const form = document.querySelector("#budget-form");

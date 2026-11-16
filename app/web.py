@@ -24,6 +24,7 @@ NAV = (
     ("/quarantine", "隔离区", "quarantine"),
     ("/attribution", "归因结果", "attribution"),
     ("/confidence", "置信区间", "confidence"),
+    ("/settlements", "返点结算", "settlements"),
     ("/budgets", "预算与批次", "budgets"),
     ("/export", "导出", "export"),
 )
@@ -32,6 +33,8 @@ STATUS_LABELS = {
     "COUNTED": "计入", "LATE": "迟到", "DROPPED": "不计入",
     "OK": "有效", "QUARANTINED": "隔离",
     "done": "完成", "ready": "就绪", "failed": "失败",
+    "confirmed": "已核销", "pending": "待确认",
+    "settled": "已结算", "observed": "观察", "mixed": "混合",
 }
 
 
